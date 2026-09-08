@@ -1,7 +1,7 @@
 import { resolveThinkingDefaultWithRuntimeCatalogCore } from "../agents/model-thinking-default.js";
 import {
   getPreparedModelCatalogSnapshot,
-  loadPreparedModelCatalog as readPreparedModelCatalog,
+  readPreparedModelCatalog,
   type LoadPreparedModelCatalogParams,
 } from "../agents/prepared-model-catalog.js";
 /**
