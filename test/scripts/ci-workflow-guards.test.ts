@@ -4468,7 +4468,7 @@ NODE
     );
     expect(codeqlJob.needs).toBe("prepare-mermaid");
     expect(codeqlJob["runs-on"]).toBe("macos-26-intel");
-    expect(codeqlJob["timeout-minutes"]).toBe(45);
+    expect(codeqlJob["timeout-minutes"]).toBe(90);
     const codeqlCheckout = expectDefined(
       codeqlJob.steps.find((step: WorkflowStep) => step.name === "Checkout"),
       "CodeQL macOS checkout",
