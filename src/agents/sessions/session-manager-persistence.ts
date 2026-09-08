@@ -459,7 +459,7 @@ export class SessionManagerPersistence extends SessionManagerCore {
     return undefined;
   }
 
-  protected persist(entry: SessionEntry, options?: PersistRecordOptions): PersistRecordResult {
+  public persist(entry: SessionEntry, options?: PersistRecordOptions): PersistRecordResult {
     return this.persistRecord(entry, options);
   }
 
