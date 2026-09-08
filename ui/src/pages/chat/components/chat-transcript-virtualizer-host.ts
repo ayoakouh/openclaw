@@ -34,6 +34,7 @@ import {
   PositionRailGutterController,
   syncScrollMargin,
 } from "./chat-transcript-geometry.ts";
+import { ChatTranscriptInitialLayout } from "./chat-transcript-initial-layout.ts";
 import {
   type ChatTranscriptInteractionAnchor,
   reconcileChatTranscriptInteractionResize,
@@ -65,11 +66,14 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
   private observedWidth: number | null = null;
   private observedHeight: number | null = null;
   private contentReady = false;
+  private readonly initialLayout: ChatTranscriptInitialLayout;
+  get initialLayoutReady(): boolean {
+    return this.initialLayout.ready;
+  }
   // The in-flow history header's fixed height, folded into scrollMargin.
   // appliedHeaderHeight is what the current virtualizer margin already carries.
   private headerHeight = 0;
   private appliedHeaderHeight = 0;
-  private implicitEndAnchorPending: boolean;
   private pendingScrollOffset: {
     offset: number;
     stableFrames: number;
@@ -154,6 +158,7 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
       this.pendingRowMeasureFrame = null;
       if (element === this.scrollElement) {
         this.measureConnectedRows();
+        this.initialLayout.update();
       }
     });
   }
@@ -214,7 +219,6 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
     private readonly callbacks: TranscriptCallbacks = {},
   ) {
     this.positionRail = new PositionRailGutterController(this, () => this.threadInnerElement);
-    this.implicitEndAnchorPending = initialOffset === null;
     this.virtualizerController = new VirtualizerController(this, {
       count: 0,
       getScrollElement: () => this.scrollElement,
@@ -333,6 +337,18 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
       scrollEndThreshold: -1,
       overscan: CHAT_TRANSCRIPT_OVERSCAN,
     });
+    this.initialLayout = new ChatTranscriptInitialLayout({
+      host,
+      virtualizer: this.virtualizerController.getVirtualizer(),
+      scrollElement: () => this.scrollElement,
+      pending: () =>
+        !this.contentReady ||
+        this.pendingScrollOffset !== null ||
+        this.pendingRowMeasureFrame !== null ||
+        this.isProgrammaticScroll,
+      initialOffset,
+      onReady: callbacks.onInitialLayoutReady,
+    });
     if (initialOffset !== null) {
       this.pendingScrollOffset = {
         offset: initialOffset,
@@ -382,8 +398,8 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
       controller.hostUpdated?.();
     }
     this.reconcileInteractionResize();
-    this.reconcileImplicitEndAnchor();
     this.applyPendingScrollOffset();
+    this.initialLayout.update();
   }
 
   disconnect(): void {
@@ -450,6 +466,7 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
           this.syncHeaderMargin();
         }
         this.announcement.sync(announcement, announce);
+        this.initialLayout.rendered();
         return renderChatTranscriptLayout({
           rows,
           renderRow,
@@ -608,7 +625,7 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
     onSettled?: (position: ChatSessionScrollPosition) => void,
   ): void {
     this.cancelScroll();
-    this.implicitEndAnchorPending = false;
+    this.initialLayout.cancelEndAnchor();
     this.pendingScrollOffset = { offset, stableFrames: 0, zeroMaxFrames: 0, onSettled };
     if (this.connected) {
       this.host.requestUpdate();
@@ -693,31 +710,6 @@ export class ChatSessionVirtualizerHost implements ReactiveControllerHost, ChatT
       virtualizer.scrollOffset = next;
       virtualizer.scrollToOffset(next);
     }
-  }
-
-  private reconcileImplicitEndAnchor(): void {
-    if (!this.implicitEndAnchorPending || !this.connected || !this.contentReady) {
-      return;
-    }
-    const maxOffset = maxTranscriptScrollOffset(this.scrollElement);
-    const virtualizer = this.virtualizerController.getVirtualizer();
-    const scrollOffset = virtualizer.scrollOffset;
-    if (maxOffset === null || scrollOffset === null) {
-      return;
-    }
-    if (scrollOffset >= 0 && scrollOffset <= maxOffset) {
-      this.implicitEndAnchorPending = false;
-      return;
-    }
-    if (maxOffset !== 0) {
-      return;
-    }
-    this.implicitEndAnchorPending = false;
-    // The DOM clamps an underfilled end anchor to zero without a scroll event,
-    // so TanStack cannot reconcile its maximum-integer initial offset itself.
-    virtualizer.scrollOffset = 0;
-    virtualizer.scrollToOffset(0);
-    this.host.requestUpdate();
   }
 
   private applyPendingScrollOffset(): void {
