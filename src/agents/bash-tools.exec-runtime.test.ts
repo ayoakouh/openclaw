@@ -1020,3 +1020,98 @@ describe("runExecProcess PTY fallback", () => {
     }
   });
 });
+
+describe("runExecProcess exactEnv sandbox launcher boundary", () => {
+  it("requests exactEnv for sandbox backend launcher spawns to avoid Linux OOM score adjustment", async () => {
+    const exit = createDeferred<RunExit>();
+    let capturedSpawnInput: SpawnInput | undefined;
+    supervisorMock.spawn.mockImplementation(async (input: SpawnInput) => {
+      capturedSpawnInput = input;
+      const activity = {
+        resultSettled: false,
+        isBackgroundContinuable: () => false,
+      };
+      return {
+        pid: 8881,
+        activity,
+        stdin: null,
+        waitForExit: async () => await exit.promise,
+        cancel: vi.fn(),
+      };
+    });
+
+    const run = await runExecProcess({
+      command: "echo test",
+      workdir: "/tmp",
+      env: {},
+      sandbox: {
+        containerName: "sandbox-c",
+        workspaceDir: "/workspace",
+        containerWorkdir: "/workspace",
+        buildExecSpec: async () => ({
+          argv: ["docker", "exec", "-i", "sandbox-c", "/bin/sh", "-c", "echo test"],
+          env: { BACKEND_ENV: "true" },
+          stdinMode: "pipe-closed",
+          finalizeToken: "token-1",
+        }),
+        finalizeExec: vi.fn(async () => {}),
+      },
+      usePty: false,
+      warnings: [],
+      maxOutput: 1000,
+      pendingMaxOutput: 1000,
+      notifyOnExit: false,
+      sessionKey: "session-sandbox",
+      timeoutSec: null,
+    });
+
+    expect(capturedSpawnInput).toBeDefined();
+    expect(capturedSpawnInput).toMatchObject({
+      mode: "child",
+      exactEnv: true,
+      argv: ["docker", "exec", "-i", "sandbox-c", "/bin/sh", "-c", "echo test"],
+    });
+
+    exit.resolve(createRunExit({ exitCode: 0 }));
+    await run.promise;
+  });
+
+  it("does not set exactEnv for ordinary host command spawns, preserving the OOM score wrapper", async () => {
+    const exit = createDeferred<RunExit>();
+    let capturedSpawnInput: SpawnInput | undefined;
+    supervisorMock.spawn.mockImplementation(async (input: SpawnInput) => {
+      capturedSpawnInput = input;
+      const activity = {
+        resultSettled: false,
+        isBackgroundContinuable: () => false,
+      };
+      return {
+        pid: 8882,
+        activity,
+        stdin: null,
+        waitForExit: async () => await exit.promise,
+        cancel: vi.fn(),
+      };
+    });
+
+    const run = await runExecProcess({
+      command: "echo host-test",
+      workdir: "/tmp",
+      env: {},
+      usePty: false,
+      warnings: [],
+      maxOutput: 1000,
+      pendingMaxOutput: 1000,
+      notifyOnExit: false,
+      sessionKey: "session-host",
+      timeoutSec: null,
+    });
+
+    expect(capturedSpawnInput).toBeDefined();
+    expect(capturedSpawnInput?.mode).toBe("child");
+    expect((capturedSpawnInput as { exactEnv?: boolean }).exactEnv).toBeUndefined();
+
+    exit.resolve(createRunExit({ exitCode: 0 }));
+    await run.promise;
+  });
+});

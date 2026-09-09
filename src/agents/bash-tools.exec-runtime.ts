@@ -881,6 +881,7 @@ export async function runExecProcess({
         argv: backendExecSpec.argv,
         env: backendExecSpec.env,
         stdinMode: backendExecSpec.stdinMode,
+        exactEnv: true as const,
       };
     }
     const { shell, args: shellArgs } = getShellConfig();
@@ -969,6 +970,7 @@ export async function runExecProcess({
         mode: "child",
         argv: spawnSpec.argv,
         stdinMode: spawnSpec.stdinMode,
+        ...(opts.sandbox ? { exactEnv: true as const } : {}),
       });
     }
   } catch (error) {
