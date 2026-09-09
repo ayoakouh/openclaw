@@ -909,6 +909,7 @@ export async function runExecProcess({
       argv,
       env: shellRuntimeEnv,
       stdinMode: opts.usePty ? ("pipe-open" as const) : ("pipe-closed" as const),
+      exactEnv: undefined,
     };
   };
 
@@ -970,7 +971,7 @@ export async function runExecProcess({
         mode: "child",
         argv: spawnSpec.argv,
         stdinMode: spawnSpec.stdinMode,
-        ...(opts.sandbox ? { exactEnv: true as const } : {}),
+        ...(spawnSpec.exactEnv ? { exactEnv: true as const } : {}),
       });
     }
   } catch (error) {
