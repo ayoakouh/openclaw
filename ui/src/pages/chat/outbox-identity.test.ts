@@ -802,4 +802,55 @@ describe("optimistic local bubble canonical attachment and fail-sticky retention
     expect(queue[0]!.sendState).toBe("failed");
     expect(queue[0]!.sendError).toBe("Network failure");
   });
+
+  it("does not suppress local queued item in conversation A when conversation B has a durable row with the same sendRunId during snapshot, reconcile, or allItems", () => {
+    const host = { ...state, hello: null, chatQueue: new Array<ChatQueueItem>() };
+    const owner = chatOutboxOwner(host);
+    const scopeA = resolveUiConversationIdentity(host, host.sessionKey);
+    const scopeB = { sessionKey: "agent:other-conversation:workspace", agentId: "other" };
+
+    const sharedRunId = "cross-scope-collision-run-id";
+
+    // Conversation B has an admitted durable row
+    const durableB: ChatQueueItem = {
+      id: "durable-b-row",
+      text: "Message in B",
+      createdAt: 100,
+      sendRunId: sharedRunId,
+      sendAttempts: 1,
+      sendState: "waiting-model",
+      sessionKey: scopeB.sessionKey,
+      agentId: scopeB.agentId,
+    };
+    expect(
+      admitStoredChatComposerQueueItem(
+        host,
+        captureChatOutboxAdmission(host, scopeB.sessionKey, scopeB.agentId),
+        durableB,
+      ),
+    ).toBe(true);
+
+    // Conversation A has a local pending item with the same sendRunId
+    const localA: ChatQueueItem = {
+      id: "local-a-item",
+      text: "Message in A",
+      createdAt: 200,
+      sendRunId: sharedRunId,
+      sendAttempts: 0,
+      sendState: "sending",
+    };
+    owner.keep(host, scopeA, localA);
+
+    // 1. Snapshot in conversation A must retain localA and not drop it due to conversation B's durable row
+    const snapshotA = owner.snapshot(host, scopeA);
+    expect(snapshotA).toHaveLength(1);
+    expect(snapshotA[0]!.id).toBe("local-a-item");
+    expect(snapshotA[0]!.text).toBe("Message in A");
+
+    // 2. allItems must include localA alongside durableB without suppressing localA
+    const all = owner.allItems(host);
+    expect(all.some((item) => item.id === "local-a-item")).toBe(true);
+    expect(all.some((item) => item.id === "durable-b-row")).toBe(true);
+    expect(all).toHaveLength(2);
+  });
 });

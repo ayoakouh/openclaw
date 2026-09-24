@@ -46,14 +46,11 @@ const isAttention = (s?: string) => s === "failed" || s === "unconfirmed" || s =
 const storageIds = new WeakMap<Storage, number>();
 let nextStorageId = 0;
 function isActiveLocal(state: HostProjection, item: ChatQueueItem): boolean {
-  const seen =
-    state.durableSeen.has(item.id) ||
-    Boolean(item.sendRunId && state.durableSeen.has(item.sendRunId));
   return Boolean(
     item.pendingRunId ||
     item.sendState === "waiting-model" ||
     state.retryable.has(item.id) ||
-    !seen,
+    !state.durableSeen.has(item.id),
   );
 }
 // One gateway owner merges durable, live, and pane-local rows for every subscribed pane.
@@ -166,10 +163,9 @@ class ChatOutboxGatewayOwner {
     const visible = durable.map((item) => {
       const pending =
         localById.get(item.id) ?? (item.sendRunId ? localByRunId.get(item.sendRunId) : undefined);
-      for (const tid of [item.id, item.sendRunId, pending?.id, pending?.sendRunId]) {
-        if (tid) {
-          state.durableSeen.add(tid);
-        }
+      state.durableSeen.add(item.id);
+      if (pending?.id) {
+        state.durableSeen.add(pending.id);
       }
       const live = this.readLive(key, item.id, item)?.item;
       return pending?.pendingRunId || pending?.sendState === "waiting-model"
@@ -343,16 +339,17 @@ class ChatOutboxGatewayOwner {
     };
   }
   private reconcile(host: Host, state: HostProjection): void {
-    const durableRows = listStoredChatOutboxes(host).flatMap((o) => o.queue);
-    const durableIds = new Set(durableRows.map((i) => i.id));
-    const durableRunIds = new Set(durableRows.flatMap((i) => (i.sendRunId ? [i.sendRunId] : [])));
+    const outboxes = listStoredChatOutboxes(host);
+    const durableIds = new Set(outboxes.flatMap((o) => o.queue.map((i) => i.id)));
     durableIds.forEach((id) => state.durableSeen.add(id));
-    durableRunIds.forEach((id) => state.durableSeen.add(id));
-    for (const local of state.byScope.values()) {
+    for (const [key, local] of state.byScope.entries()) {
+      const scopeOutbox = outboxes.find((o) => storedChatOutboxScopeKey(o) === key);
+      const scopeIds = new Set(scopeOutbox?.queue.map((i) => i.id) ?? []);
+      const scopeRunIds = new Set(scopeOutbox?.queue.map((i) => i.sendRunId).filter(Boolean) ?? []);
       local.queue = local.queue.filter(
         (i) =>
-          durableIds.has(i.id) ||
-          (i.sendRunId && durableRunIds.has(i.sendRunId)) ||
+          scopeIds.has(i.id) ||
+          (i.sendRunId && scopeRunIds.has(i.sendRunId)) ||
           isActiveLocal(state, i),
       );
     }
@@ -443,9 +440,6 @@ class ChatOutboxGatewayOwner {
     );
     if (stored) {
       state.durableSeen.add(stored.id);
-      if (stored.sendRunId) {
-        state.durableSeen.add(stored.sendRunId);
-      }
       match.queue[match.index] = this.project(stored, current);
     } else {
       match.queue.splice(match.index, 1);
@@ -635,15 +629,18 @@ class ChatOutboxGatewayOwner {
     this.prune(host);
   }
   allItems(host: Host): ChatQueueItem[] {
-    const durable = listStoredChatOutboxes(host).flatMap((o) => this.snapshot(host, o, o.queue));
-    const local = [...this.state(host).byScope.values()].flatMap(({ queue }) => queue);
-    const durableRunIds = new Set(durable.map((item) => item.sendRunId).filter(Boolean));
-    const durableIds = new Set(durable.map((item) => item.id));
-    const remaining = local.filter(
-      (i) => !durableIds.has(i.id) && (!i.sendRunId || !durableRunIds.has(i.sendRunId)),
-    );
+    const outboxes = listStoredChatOutboxes(host);
+    const durable = outboxes.flatMap((o) => this.snapshot(host, o, o.queue));
+    const local = [...this.state(host).byScope.entries()].flatMap(([key, { queue }]) => {
+      const scopeOutbox = outboxes.find((o) => storedChatOutboxScopeKey(o) === key);
+      const scopeRunIds = new Set(scopeOutbox?.queue.map((i) => i.sendRunId).filter(Boolean) ?? []);
+      const scopeIds = new Set(scopeOutbox?.queue.map((i) => i.id) ?? []);
+      return queue.filter(
+        (i) => !scopeIds.has(i.id) && (!i.sendRunId || !scopeRunIds.has(i.sendRunId)),
+      );
+    });
     this.prune(host);
-    return [...new Map([...remaining, ...durable].map((i) => [i.id, i])).values()];
+    return [...new Map([...local, ...durable].map((i) => [i.id, i])).values()];
   }
   private prune(host: Host): void {
     const state = this.hosts.get(host);
