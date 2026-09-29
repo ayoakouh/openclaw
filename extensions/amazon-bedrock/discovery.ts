@@ -177,12 +177,6 @@ function isKnownClaudeMythosPreviewModelId(modelId: string): boolean {
   );
 }
 
-function resolveKnownThinkingLevelMap(
-  modelId: string,
-): ModelDefinitionConfig["thinkingLevelMap"] | undefined {
-  return resolveBedrockNativeThinkingLevelMap(modelId);
-}
-
 function resolveKnownMaxTokens(modelId: string): number | undefined {
   return resolveClaudeFable5ModelIdentity({ id: modelId }) ||
     resolveClaudeMythos5ModelIdentity({ id: modelId }) ||
@@ -329,7 +323,7 @@ function toModelDefinition(
   defaults: { contextWindow: number; maxTokens: number },
 ): ModelDefinitionConfig {
   const id = summary.modelId?.trim() ?? "";
-  const thinkingLevelMap = resolveKnownThinkingLevelMap(id);
+  const thinkingLevelMap = resolveBedrockNativeThinkingLevelMap(id);
   return {
     id,
     name: summary.modelName?.trim() || id,
@@ -447,7 +441,7 @@ function resolveInferenceProfiles(
     const baseModel = baseModelId
       ? foundationModels.get(normalizeLowercaseStringOrEmpty(baseModelId))
       : undefined;
-    const knownThinkingLevelMap = resolveKnownThinkingLevelMap(
+    const knownThinkingLevelMap = resolveBedrockNativeThinkingLevelMap(
       baseModelId ?? profile.inferenceProfileId,
     );
     const contractModelId = baseModelId ?? profile.inferenceProfileId;
